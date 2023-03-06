@@ -22,5 +22,6 @@ YT-D - это GUI оболочка для утилиты yt-dlp, которая 
 ## Ссылки:
 [therecipe/qt](https://github.com/therecipe/qt)  
 [Qt](https://www.qt.io)  
-
-![]()
+  
+ ---
+![](https://github.com/Apanazar/stuprum/blob/master/yt-d.png)
