@@ -1,31 +1,28 @@
 package main
 
 import (
-	"math"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
-	"strconv"
 	"sync"
 
-	"github.com/therecipe/qt/core"
-	"github.com/therecipe/qt/gui"
-	"github.com/therecipe/qt/widgets"
+	"github.com/gotk3/gotk3/gtk"
 )
 
 func isYouTubeLink(link string) bool {
 	u, err := url.Parse(link)
 	if err != nil {
+		log.Println(err)
 		return false
 	}
 	return u.Host == "www.youtube.com" || u.Host == "youtube.com" || u.Host == "youtu.be"
 }
 
-func downloadFile(dir, link, ytType string, wg *sync.WaitGroup, pb *widgets.QProgressBar) {
+func downloadFile(dir, link, ytType string, wg *sync.WaitGroup, textBuffer *gtk.TextBuffer) {
 	defer wg.Done()
-	var cmd *exec.Cmd
 
+	var cmd *exec.Cmd
 	switch ytType {
 	case "Audio":
 		cmd = exec.Command("yt-dlp", "-x", "-i", "--no-playlist", "-P", dir, link)
@@ -35,109 +32,105 @@ func downloadFile(dir, link, ytType string, wg *sync.WaitGroup, pb *widgets.QPro
 		cmd = exec.Command("yt-dlp", "-f", "best", "--only-playlist", "-P", dir, link)
 	}
 
-	re := regexp.MustCompile(`\[download\]\s+(\d+.\d)%\s+of`)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Println("Error obtaining stdout pipe:", err)
+		return
+	}
 
-	stdout, _ := cmd.StdoutPipe()
-	cmd.Start()
-	cmd.Run()
+	err = cmd.Start()
+	if err != nil {
+		log.Println("Error starting command:", err)
+		return
+	}
 
 	buf := make([]byte, 1024)
 	go func() {
 		for {
 			n, err := stdout.Read(buf)
 			if err != nil {
+				log.Println("Error reading stdout:", err)
 				break
 			}
 
 			text := string(buf[:n])
-			match := re.FindStringSubmatch(text)
 
-			if len(match) > 0 {
-				percent := match[1]
-				valf, _ := strconv.ParseFloat(percent, 64)
-				value := int(math.Round(valf*10) / 10)
-
-				pb.SetValue(value)
-			}
+			textBuffer.InsertAtCursor(text)
 		}
 	}()
+
+	err = cmd.Wait()
+	if err != nil {
+		log.Println("Error waiting for command completion:", err)
+	}
 }
 
 func main() {
-	app := widgets.NewQApplication(len(os.Args), os.Args)
-	icon := gui.NewQIcon5("./src/img/icon.png")
+	gtk.Init(nil)
 
-	window := widgets.NewQMainWindow(nil, 0)
-	window.SetWindowIcon(icon)
-	window.SetFixedSize2(500, 300)
-	window.SetWindowTitle("YT-D")
+	window, _ := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	window.SetTitle("YT-D")
+	window.SetDefaultSize(500, 400)
+	window.SetResizable(false)
+	window.SetIconFromFile("./src/img/icon.png")
 
-	label := widgets.NewQLabel2("Status:", nil, 0)
+	vbox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 
-	progressBar := widgets.NewQProgressBar(nil)
-	progressBar.SetContentsMargins(0, 0, 0, 30)
-	progressBar.SetFixedHeight(20)
-	progressBar.SetMinimum(0)
-	progressBar.SetMaximum(100)
-	progressBar.SetValue(0)
+	textView, _ := gtk.TextViewNew()
+	textBuffer, _ := textView.GetBuffer()
+	textView.SetSizeRequest(-1, 150)
+	textView.SetSensitive(false)
 
-	entry := widgets.NewQLineEdit(nil)
-	entry.SetPlaceholderText("URL")
-	entry.SetFixedHeight(25)
+	entry, _ := gtk.EntryNew()
+	entry.SetPlaceholderText("Enter YouTube URL")
+	entry.SetWidthChars(40)
 
-	combo := widgets.NewQComboBox(nil)
-	combo.SetFixedHeight(35)
-	combo.AddItem("Video", core.NewQVariant1("Video"))
-	combo.AddItem("Audio", core.NewQVariant1("Audio"))
-	combo.AddItem("Playlist", core.NewQVariant1("Playlist"))
+	combo, _ := gtk.ComboBoxTextNew()
+	combo.AppendText("Video")
+	combo.AppendText("Audio")
+	combo.AppendText("Playlist")
 
-	button := widgets.NewQPushButton2("OK", nil)
-	button.ConnectClicked(func(bool) {
-		urlLink := entry.Text()
+	button, _ := gtk.ButtonNewWithLabel("\tStart\t")
+	button.SetHAlign(gtk.ALIGN_CENTER)
 
+	button.SetMarginTop(20)
+	button.SetMarginBottom(20)
+
+	button.Connect("clicked", func() {
+		urlLink, _ := entry.GetText()
 		downloadsPath, err := os.Getwd()
 		if err != nil {
+			log.Println("Error getting current directory:", err)
 			return
 		}
 
-		if isYouTubeLink(entry.Text()) {
+		if isYouTubeLink(urlLink) {
 			var wg sync.WaitGroup
 			wg.Add(1)
-			go downloadFile(downloadsPath, urlLink, combo.CurrentText(), &wg, progressBar)
-			wg.Wait()
+			go downloadFile(downloadsPath, urlLink, combo.GetActiveText(), &wg, textBuffer)
 		} else {
-			widgets.QMessageBox_Information(
-				nil,
-				"YT-D: Info",
-				"The data entered is not a YouTube URL",
-				widgets.QMessageBox__Ok,
-				widgets.QMessageBox__Ok,
-			)
+			dialog := gtk.MessageDialogNew(window, gtk.DIALOG_MODAL, gtk.MESSAGE_INFO, gtk.BUTTONS_OK, "The data entered is not a YouTube URL")
+			dialog.Run()
+			dialog.Destroy()
 		}
 	})
 
-	widget1 := widgets.NewQFrame(nil, 0)
-	widget1Layout := widgets.NewQVBoxLayout2(widget1)
-	widget1Layout.AddWidget(label, 0, 0)
-	widget1Layout.AddSpacing(-60)
-	widget1Layout.AddWidget(progressBar, 0, 0)
+	vbox.PackStart(textView, true, true, 10)
+	vbox.PackStart(entry, false, false, 5)
+	vbox.PackStart(combo, false, false, 0)
+	vbox.PackStart(button, false, false, 0)
 
-	widget2 := widgets.NewQFrame(nil, 0)
-	widget2Layout := widgets.NewQVBoxLayout2(widget2)
-	widget2Layout.AddWidget(entry, 0, 0)
-	widget2Layout.AddWidget(combo, 0, 0)
-	widget2Layout.AddSpacing(25)
-	widget2Layout.AddWidget(button, 0, 0)
+	vbox.SetMarginTop(20)
+	vbox.SetMarginBottom(20)
+	vbox.SetMarginStart(20)
+	vbox.SetMarginEnd(20)
 
-	mainLayout := widgets.NewQVBoxLayout()
-	mainLayout.AddWidget(widget1, 0, 0)
-	mainLayout.AddSpacing(15)
-	mainLayout.AddWidget(widget2, 0, 0)
+	window.Add(vbox)
+	window.ShowAll()
 
-	centralWidget := widgets.NewQWidget(nil, 0)
-	centralWidget.SetLayout(mainLayout)
+	window.Connect("destroy", func() {
+		gtk.MainQuit()
+	})
 
-	window.SetCentralWidget(centralWidget)
-	window.Show()
-	app.Exec()
+	gtk.Main()
 }

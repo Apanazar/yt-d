@@ -1,7 +1,7 @@
 module golang/yt-d
 
-go 1.19
+go 1.23.0
 
-require github.com/therecipe/qt v0.0.0-20200904063919-c0c124a5770d
+toolchain go1.23.7
 
-require github.com/gopherjs/gopherjs v1.17.2 // indirect
+require github.com/gotk3/gotk3 v0.6.2
